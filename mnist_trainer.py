@@ -254,7 +254,6 @@ def main():
   parser.add_argument('--batch-size', type=int, default=128)
   args = parser.parse_args()
   print(args)
-
   print('\n'.join([f'{k}={v}' for k, v in os.environ.items()]))
 
   barrier()
