@@ -16,6 +16,25 @@ from torch.utils import data
 from torchvision import datasets
 from torchvision import transforms
 
+datasets.MNIST.resources = [
+    # The endpoints and validation hashes.
+    ('https://ossci-datasets.s3.amazonaws.com/mnist/train-images-idx3-ubyte.gz',
+     'f68b3c2dcbeaaa9fbdd348bbdeb94873'),
+    ('https://ossci-datasets.s3.amazonaws.com/mnist/train-labels-idx1-ubyte.gz',
+     'd53e105ee54ea40749a09fcbcd1e9432'),
+    ('https://ossci-datasets.s3.amazonaws.com/mnist/t10k-images-idx3-ubyte.gz',
+     '9fb629c4189551a2d022fa330f9573f3'),
+    ('https://ossci-datasets.s3.amazonaws.com/mnist/t10k-labels-idx1-ubyte.gz',
+     'ec29112dd5afa0611ce80d1b7f02629c')
+]
+
+# This is needed to download MNIST dataset without 403 Forbidden issue.
+# Pytorch MNIST dataset is served through cloudflare and they have protection
+# feature that blocks requests without User-agent field.
+opener = urllib.request.build_opener()
+opener.addheaders = [('User-agent', 'Mozilla/5.0')]
+urllib.request.install_opener(opener)
+
 
 def distributed_is_initialized():
   return distributed.is_available() and distributed.is_initialized()
@@ -155,14 +174,22 @@ class MNISTDataLoader(data.DataLoader):
   Contains data loading, transformation, and sampling steps.
   """
 
-  def __init__(self, root, batch_size, train=True):
+  def __init__(self, root, batch_size, local_rank, train=True):
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,)),
     ])
 
-    dataset = datasets.MNIST(
-        root, train=train, transform=transform, download=True)
+    dataset = None
+    if local_rank == 0:
+      dataset = datasets.MNIST(
+          root, train=train, transform=transform, download=True)
+      torch.distributed.barrier()
+    else:
+      torch.distributed.barrier()
+      dataset = datasets.MNIST(
+          root, train=train, transform=transform, download=False)
+
     sampler = None
     if train and distributed_is_initialized():
       sampler = data.DistributedSampler(dataset)
@@ -184,15 +211,17 @@ def run(args):
   model = Net()
   if distributed_is_initialized():
     model.to(device)
-    model = nn.parallel.DistributedDataParallel(model)
+    model = nn.parallel.DistributedDataParallel(
+      model, device_ids=[args.local_rank], output_device=args.local_rank)
   else:
     model = nn.DataParallel(model)
     model.to(device)
 
   optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate)
 
-  train_loader = MNISTDataLoader(args.root, args.batch_size, train=True)
-  test_loader = MNISTDataLoader(args.root, args.batch_size, train=False)
+  download = args.local_rank == 0
+  train_loader = MNISTDataLoader(args.root, args.batch_size, args.local_rank, train=True)
+  test_loader = MNISTDataLoader(args.root, args.batch_size, args.local_rank, train=False)
 
   trainer = Trainer(model, optimizer, train_loader, test_loader, device)
   trainer.fit(args.epochs)
@@ -213,7 +242,7 @@ def barrier():
   while attempt < 10:
     try:
       print(f'{rank}# Connecting to barrier {master_addr}:{master_port} ...')
-      store = distributed.TCPStore(master_addr, master_port, world_size, start_daemon, datetime.timedelta(seconds=30))
+      store = distributed.TCPStore(master_addr, master_port, world_size, start_daemon, datetime.timedelta(minutes=1))
       print(f'{rank}# Barrier connected.')
       print(f'{rank}# Waiting for all processes to join.')
       for i in range(world_size):
