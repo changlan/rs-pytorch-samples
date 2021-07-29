@@ -12,4 +12,4 @@ ENV NCCL_DEBUG=INFO
 COPY mnist_trainer.py mnist_trainer.py
 COPY run.sh run.sh
 
-ENTRYPOINT ["run.sh"]
+ENTRYPOINT ["/root/run.sh"]
