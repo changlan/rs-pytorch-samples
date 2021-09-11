@@ -1,4 +1,4 @@
-FROM gcr.io/deeplearning-platform-release/pytorch-gpu.1-7
+FROM gcr.io/deeplearning-platform-release/pytorch-gpu.1-8
 WORKDIR /root
 
 # Install Reduction Server NCCL Plugin

@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # Change the following variables as needed:
-NUM_GPUS_PER_WORKER=8
+NUM_GPUS_PER_WORKER=${NUM_GPUS_PER_WORKER:-8}
 
 echo "Number of workers: $WORLD_SIZE"
 echo "Worker rank: $RANK"
